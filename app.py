@@ -25,26 +25,61 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
     Called by Gradio when the user submits a query.
 
     Args:
-        user_query:     The text the user typed into the search box.
+        user_query:      The text the user typed into the search box.
         wardrobe_choice: Either "Example wardrobe" or "Empty wardrobe (new user)".
 
     Returns:
-        A tuple of three strings:
-            (listing_text, outfit_suggestion, fit_card)
-        Each string maps to one of the three output panels in the UI.
-
-    TODO:
-        1. Guard against an empty query (return early with an error message).
-        2. Select the wardrobe based on wardrobe_choice.
-        3. Call run_agent() with the query and selected wardrobe.
-        4. If session["error"] is set, return the error in the first panel
-           and empty strings for the other two.
-        5. Otherwise, format session["selected_item"] into a readable listing_text
-           string and return it along with session["outfit_suggestion"] and
-           session["fit_card"].
+        A tuple of (listing_text, outfit_suggestion, fit_card) — one string
+        per output panel. On error, the error message goes in the first panel.
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    # Step 1: Guard against an empty query
+    if not user_query or not user_query.strip():
+        return "Please enter a search query to get started.", "", ""
+
+    # Step 2: Select the wardrobe based on the radio button choice
+    wardrobe = (
+        get_example_wardrobe()
+        if wardrobe_choice == "Example wardrobe"
+        else get_empty_wardrobe()
+    )
+
+    # Step 3: Run the planning loop
+    session = run_agent(user_query, wardrobe)
+
+    # Step 4: If the agent hit an error, surface it in the first panel
+    if session["error"] and session["selected_item"] is None:
+        return session["error"], "", ""
+
+    # Step 5: Format the selected listing into a readable string for the first panel
+    item = session["selected_item"]
+    retry_note = f"\n\n⚠️ {session.get('retry_message', '')}" if session.get("retry_message") else ""
+
+    # Build price assessment line for the listing panel (stretch)
+    price_note = ""
+    pa = session.get("price_assessment")
+    if pa and pa.get("assessment") != "unknown":
+        emoji = {"good deal": "✅", "fair": "➡️", "overpriced": "⚠️"}.get(pa["assessment"], "")
+        price_note = f"\nPrice verdict: {emoji} {pa['assessment'].upper()} — {pa['reasoning']}"
+
+    listing_text = (
+        f"🛍️ {item.get('title', 'Unknown')}\n"
+        f"💲 ${item.get('price', '?')} · {item.get('platform', '?')}\n"
+        f"📏 Size: {item.get('size', '?')} · Condition: {item.get('condition', '?')}\n"
+        f"🏷️ Brand: {item.get('brand', '?')}\n"
+        f"🎨 Colors: {', '.join(item.get('colors', []))}\n"
+        f"✨ Tags: {', '.join(item.get('style_tags', []))}"
+        f"{price_note}"
+        f"{retry_note}"
+    )
+
+    outfit = session.get("outfit_suggestion") or ""
+    fit_card = session.get("fit_card") or ""
+
+    # If fit card errored but outfit is fine, show the error inline in that panel
+    if session["error"] and session["outfit_suggestion"]:
+        fit_card = session["error"]
+
+    return listing_text, outfit, fit_card
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
